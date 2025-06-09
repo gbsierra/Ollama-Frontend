@@ -116,12 +116,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
     // Set the window width and height
-    int windowWidth = 400;
-    int windowHeight = 400;
+    int windowWidth = 800;
+    int windowHeight = 660;
 
-    // Calculate the centered position
-    int posX = (screenWidth - windowWidth) / 2;
-    int posY = (screenHeight - windowHeight) / 2;
+    // Calculate position
+    int posX = (screenWidth - windowWidth) - 10;
+    int posY = (screenHeight - windowHeight) - 45;
 
     // Create the window at the calculated position
     HWND hwnd = ::CreateWindowW(
@@ -170,7 +170,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     style.FrameBorderSize = 1.0f;
     style.ScrollbarSize = 18.0f;
     style.FrameRounding = 5.0f;
-    ImGui::StyleColorsDark();
+    ImGui::StyleColorsClassic();
 
     // Enable Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;  // Enable Keyboard Controls
@@ -516,7 +516,7 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         ScreenToClient(hWnd, &pt);
 
         // If within header
-        if (pt.y < 50 && pt.x < 335) {
+        if (pt.y < 40 && pt.x < 735) {
             return HTCAPTION;  // HTCAPTION means the window can be dragged
         }
         return DefWindowProcW(hWnd, msg, wParam, lParam);

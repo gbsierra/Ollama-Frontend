@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 #include <string>
 #include <cstdlib>  // For the system() function
 #include <functional>
@@ -7,29 +7,54 @@
 #include <cstdio>
 #include <memory>
 #include <stdexcept>
+#include <sstream>
+
 
 // ModelClient class for interacting with Ollama
 class ModelClient {
 private:
     std::string model;
+    std::string output;
 
 public:
-    // Constructor to set the model name
-    ModelClient(const std::string& modelName) : model(modelName) {}
+    // Constructor
+    ModelClient(const std::string& modelName){
+        model = modelName;
+    }
 
-    // setModel() - Method to set a new model
+    // setModel() - Mutator to set a new model
     void setModel(const std::string& modelName) {
         model = modelName;
     }
 
+    // getModel() - Accessor to get the current model name
+    std::string getModel() const {
+        return model;
+    }
+    
+    // getOutput() - Accessor to get output
+    std::string getOutput() const {
+        return output;
+    }
+
+    // setOutput() - Mutator for output
+    void setOutput(const std::string& output) {
+        this->output = output;
+    }
+    
+    // clearOutput() - clears output
+    void clearOutput() {
+        output.clear();
+    }
+
     // sendPrompt() - Method to send a prompt and get a response
     std::string sendPrompt(const std::string& prompt) {
-        // Check if model is specified
+        // Check if has model
         if (model.empty()) {
             throw std::runtime_error("Model name is not specified");
         }
 
-        // Escape special characters in the prompt
+        // Escape special characters in prompt
         std::string escapedPrompt;
         for (char c : prompt) {
             if (c == '"' || c == '\\') {
@@ -38,149 +63,130 @@ public:
             escapedPrompt += c;
         }
 
-        // Construct the command to match working syntax
+        // Construct command
         std::string command = "ollama run " + model + " \"" + escapedPrompt + "\"";
 
-        // Debug: Print the command being executed
-        std::cout << "Executing command: " << command << std::endl;
-
-        // Execute the command
+        // Execute command (recieves response dynamically)
         std::string result = OpenTerminal(command, true);
-
-        // Debug: Print the result
-        std::cout << "Command output: " << result << std::endl;
 
         return result;
     }
 
-    // getModel() - Method to get the current model name
-    std::string getModel() const {
-        return model;
+    // removeAnsiCodes() - helper func
+    std::string removeAnsiCodes(const std::string& text, std::string& buffer) {
+        std::string result;
+        bool in_escape = !buffer.empty(); // Continue from previous escape state?
+
+        buffer += text; // Append new text to buffer to handle partial sequences
+
+
+        for (size_t i = 0; i < buffer.length(); ++i) {
+            if (buffer[i] == '\033' || buffer[i] == 27) { // Start of ANSI escape sequence
+                in_escape = true;
+                continue;
+            }
+            if (in_escape) {
+                // if a common ANSI sequence terminator
+                if (buffer[i] == 'm' || buffer[i] == 'h' || buffer[i] == 'l' || buffer[i] == 'K') {
+                    in_escape = false;
+                }
+                continue;
+            }
+            if (std::isprint(static_cast<unsigned char>(buffer[i])) || buffer[i] == '\n') {
+                result += buffer[i];
+            }
+        }
+
+        // If still in an escape sequence, keep the partial sequence in buffer
+        if (in_escape) {
+            size_t last_complete = buffer.find_last_of("mhlK");
+            if (last_complete != std::string::npos && last_complete + 1 < buffer.length()) {
+                buffer = buffer.substr(last_complete + 1);
+            }
+            else {
+                buffer.clear();
+            }
+        }
+        else {
+            buffer.clear();
+        }
+
+        return result;
     }
 
-    // OpenTerminal() - Method to open windows terminal
-    static std::string OpenTerminal(const std::string& command, bool wait) {
+    // OpenTerminal() - Open terminal and execute command
+    std::string OpenTerminal(const std::string& command, bool wait) {
         static bool consoleAllocated = false;
+        static std::string ansiBuffer; // Persistent buffer for ANSI sequences
 
         // Allocate console if needed
         if (!consoleAllocated) {
             FreeConsole();
             if (AllocConsole()) {
                 FILE* dummy;
-                if (freopen_s(&dummy, "CONOUT$", "w", stdout) != 0) {
-                    DWORD error = GetLastError();
-                    return "Failed to redirect stdout, error: " + std::to_string(error);
-                }
-                if (freopen_s(&dummy, "CONOUT$", "w", stderr) != 0) {
-                    DWORD error = GetLastError();
-                    return "Failed to redirect stderr, error: " + std::to_string(error);
-                }
-                if (freopen_s(&dummy, "CONIN$", "r", stdin) != 0) {
-                    DWORD error = GetLastError();
-                    return "Failed to redirect stdin, error: " + std::to_string(error);
-                }
+                freopen_s(&dummy, "CONOUT$", "w", stdout);
+                freopen_s(&dummy, "CONOUT$", "w", stderr);
+                freopen_s(&dummy, "CONIN$", "r", stdin);
                 consoleAllocated = true;
 
-                // Ensure console is visible
                 HWND consoleWindow = GetConsoleWindow();
                 if (consoleWindow) {
                     ShowWindow(consoleWindow, SW_SHOW);
                     SetForegroundWindow(consoleWindow);
                 }
 
-                // Direct console write
                 HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
                 if (hConsole != INVALID_HANDLE_VALUE) {
-                    const char* testMsg = "DEBUG: Console allocated successfully!\n";
+                    const char* testMsg = "DEBUG: Console allocated successfully!\n\n";
                     DWORD written;
                     WriteConsoleA(hConsole, testMsg, strlen(testMsg), &written, nullptr);
                 }
-
             }
             else {
-                DWORD error = GetLastError();
-                return "Console allocation failed, error: " + std::to_string(error);
+                return "Console allocation failed!";
             }
         }
 
-        // Test output for every call
+        // check for success
         HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
         if (hConsole != INVALID_HANDLE_VALUE) {
             std::string testMsg = "COMMAND: " + command + "\n";
             DWORD written;
-            WriteConsoleA(hConsole, testMsg.c_str(), testMsg.length(), &written, nullptr);
+            WriteConsoleA(hConsole, testMsg.c_str(), (DWORD)testMsg.length(), &written, nullptr);
         }
 
+        // check if given a command
         if (command.empty()) {
-            return "Empty command";
+            return "Empty command!";
         }
-
-        // Append "< nul 2>&1" to redirect stdin and capture stdout/stderr
+        
         std::string fullCommand = command + " < nul 2>&1";
-
-        // Output string to hold the raw result
         std::string result;
 
-        // Use _popen to capture output
         std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(fullCommand.c_str(), "r"), _pclose);
         if (!pipe) {
             return "Failed to open pipe.";
         }
 
-        // Read command output into result
         char buffer[128];
         while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
-            result += buffer;
-        }
-
-        // Clean ANSI escape codes
-        std::string cleanResult;
-        bool inEscape = false;
-        for (char c : result) {
-            if (c == '\033' || c == 27) { // Start of ANSI escape sequence
-                inEscape = true;
-                continue;
-            }
-            if (inEscape) {
-                if (c == 'm' || c == 'h' || c == 'l' || c == 'K') { // Common ANSI sequence terminators
-                    inEscape = false;
-                }
-                continue;
-            }
-            if (std::isprint(static_cast<unsigned char>(c)) || c == '\n') {
-                cleanResult += c;
+            std::string chunk(buffer);
+            std::string cleanChunk = removeAnsiCodes(chunk, ansiBuffer); // Pass persistent buffer
+            result += cleanChunk;
+            setOutput(result); // set output for imgui to dynamically update
+            if (hConsole != INVALID_HANDLE_VALUE) {
+                DWORD written;
+                WriteConsoleA(hConsole, cleanChunk.c_str(), (DWORD)cleanChunk.length(), &written, nullptr);
             }
         }
 
-        // Test output for raw and clean result
-        if (hConsole != INVALID_HANDLE_VALUE) {
-            std::string outputMsg = "OUTPUT: " + cleanResult + "\n";
-            DWORD written;
-            WriteConsoleA(hConsole, outputMsg.c_str(), outputMsg.length(), &written, nullptr);
-        }
-
-        // Check _pclose status
         int status = _pclose(pipe.get());
         if (status != 0) {
-            return "Command failed with status " + std::to_string(status) + ": " + cleanResult;
+            return "Command failed with status " + std::to_string(status) + ": " + result;
         }
 
-        /* Wait for user input
-        if (wait) {
-            // Get handle to standard output
-            HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-            DWORD written;
-
-            // Display message using WriteConsoleA
-            const char* message = "Press Enter to continue...\n";
-            WriteConsoleA(hConsole, message, strlen(message), &written, nullptr);
-
-            // Wait for user input
-            std::cin.get();
-        } */
-
-
-        return cleanResult; // Return cleaned output
+        return result;
     }
+
 
 };
