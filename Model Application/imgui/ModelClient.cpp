@@ -48,7 +48,7 @@ public:
     }
 
     // sendPrompt() - Method to send a prompt and get a response
-    std::string sendPrompt(const std::string& prompt) {
+    std::string sendPrompt(const std::string& prompt, bool showConsole = true) {
         // Check if has model
         if (model.empty()) {
             throw std::runtime_error("Model name is not specified");
@@ -67,7 +67,7 @@ public:
         std::string command = "ollama run " + model + " \"" + escapedPrompt + "\"";
 
         // Execute command (recieves response dynamically)
-        std::string result = OpenTerminal(command, true);
+        std::string result = OpenTerminal(command, true, showConsole);
 
         return result;
     }
@@ -115,52 +115,66 @@ public:
     }
 
     // OpenTerminal() - Open terminal and execute command
-    std::string OpenTerminal(const std::string& command, bool wait) {
+    std::string OpenTerminal(const std::string& command, bool wait, bool showConsole = true) {
         static bool consoleAllocated = false;
         static std::string ansiBuffer; // Persistent buffer for ANSI sequences
 
-        // Allocate console if needed
-        if (!consoleAllocated) {
-            FreeConsole();
-            if (AllocConsole()) {
-                FILE* dummy;
-                freopen_s(&dummy, "CONOUT$", "w", stdout);
-                freopen_s(&dummy, "CONOUT$", "w", stderr);
-                freopen_s(&dummy, "CONIN$", "r", stdin);
-                consoleAllocated = true;
+        // showing console
+        if (showConsole) {
+            // Always attempt to allocate or ensure console is available
+            if (!consoleAllocated) {
+                FreeConsole(); // Ensure clean state
+                if (AllocConsole()) {
+                    FILE* dummy;
+                    freopen_s(&dummy, "CONOUT$", "w", stdout);
+                    freopen_s(&dummy, "CONOUT$", "w", stderr);
+                    freopen_s(&dummy, "CONIN$", "r", stdin);
+                    consoleAllocated = true;
 
+                    HWND consoleWindow = GetConsoleWindow();
+                    if (consoleWindow) {
+                        ShowWindow(consoleWindow, SW_SHOW);
+                        SetForegroundWindow(consoleWindow);
+                    }
+
+                    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+                    if (hConsole != INVALID_HANDLE_VALUE) {
+                        const char* testMsg = "DEBUG: Console allocated successfully!\n\n";
+                        DWORD written;
+                        WriteConsoleA(hConsole, testMsg, strlen(testMsg), &written, nullptr);
+                    }
+                }
+                else {
+                    return "Console allocation failed!";
+                }
+            }
+            else {
+                // Ensure console is visible if already allocated
                 HWND consoleWindow = GetConsoleWindow();
                 if (consoleWindow) {
                     ShowWindow(consoleWindow, SW_SHOW);
                     SetForegroundWindow(consoleWindow);
                 }
-
-                HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-                if (hConsole != INVALID_HANDLE_VALUE) {
-                    const char* testMsg = "DEBUG: Console allocated successfully!\n\n";
-                    DWORD written;
-                    WriteConsoleA(hConsole, testMsg, strlen(testMsg), &written, nullptr);
-                }
-            }
-            else {
-                return "Console allocation failed!";
             }
         }
+        // not showing console
+        else {
+            // free & hide console
+            if (!consoleAllocated) {
+                AllocConsole();
+            }
+            HWND consoleWindow = GetConsoleWindow();
+            ShowWindow(consoleWindow, SW_HIDE);    
 
-        // check for success
-        HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-        if (hConsole != INVALID_HANDLE_VALUE) {
-            std::string testMsg = "COMMAND: " + command + "\n";
-            DWORD written;
-            WriteConsoleA(hConsole, testMsg.c_str(), (DWORD)testMsg.length(), &written, nullptr);
         }
 
-        // check if given a command
+        // Check if given a command
         if (command.empty()) {
             return "Empty command!";
         }
-        
-        std::string fullCommand = command + " < nul 2>&1";
+
+        // Execute command and capture output
+        std::string fullCommand = "cmd.exe /C \"" + command + " < nul 2>&1\"";
         std::string result;
 
         std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(fullCommand.c_str(), "r"), _pclose);
@@ -169,14 +183,18 @@ public:
         }
 
         char buffer[128];
+        // handle stream in chunks
         while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
             std::string chunk(buffer);
             std::string cleanChunk = removeAnsiCodes(chunk, ansiBuffer); // Pass persistent buffer
             result += cleanChunk;
-            setOutput(result); // set output for imgui to dynamically update
-            if (hConsole != INVALID_HANDLE_VALUE) {
-                DWORD written;
-                WriteConsoleA(hConsole, cleanChunk.c_str(), (DWORD)cleanChunk.length(), &written, nullptr);
+            setOutput(result); // Set output for imgui to dynamically update
+            if (showConsole && consoleAllocated) { // write to allocated console
+                HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+                if (hConsole != INVALID_HANDLE_VALUE) {
+                    DWORD written;
+                    WriteConsoleA(hConsole, cleanChunk.c_str(), (DWORD)cleanChunk.length(), &written, nullptr);
+                }
             }
         }
 

@@ -59,6 +59,7 @@ namespace App {
     std::vector<std::string> outputVector;
     std::vector<std::string> inputVector;
 
+    bool showConsole = true;
 
     // Renders Main Header - called by RenderApplicationWindow()
     void RenderApplicationHeader() {
@@ -152,12 +153,74 @@ namespace App {
 
             ImGui::EndCombo();
         }
+        
+        // console toggle button
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 27);
+        ImGui::Checkbox("Show Console", &showConsole);
+        //ImGui::Text("%s", showConsole ? "true" : "false"); //debug
         ImGui::Separator();
 
         // vertical seperator
         ImDrawList* draw_list = ImGui::GetWindowDrawList();
         draw_list->AddLine(ImVec2(622, 80), ImVec2(622, 650), IM_COL32(255, 255, 255, 120), 0.4f);
 
+        // saved list
+        ImGui::SetCursorPos(ImVec2(626, 44));
+        ImGui::Text("Saved Chat Histories:");
+        ImGui::SetCursorPos(ImVec2(626, 63));
+        ImGui::BeginChild("ChatHistoryList", ImVec2(165, 525), true);
+        for (int fileNumber = 1; fileNumber <= 100; ++fileNumber) {
+            std::string filePath = "chat_history/chat_history_" + std::to_string(fileNumber) + ".txt";
+            if (!std::ifstream(filePath).good()) {
+                break;
+            }
+            std::string buttonLabel = "chat_history_" + std::to_string(fileNumber);
+            if (ImGui::Selectable(buttonLabel.c_str())) {
+                inputVector.clear();
+                outputVector.clear();
+                std::ifstream inFile(filePath);
+                if (inFile.is_open()) {
+                    std::string line;
+                    std::string currentMessage;
+                    bool isPrompt = false;
+
+                    while (std::getline(inFile, line)) {
+                        if (line.empty()) continue;
+
+                        if (line.find("User Prompt: ") == 0) {
+                            // Save previous message before resetting
+                            if (!currentMessage.empty()) {
+                                (isPrompt ? inputVector : outputVector).push_back(currentMessage);
+                            }
+                            currentMessage = line.substr(12);
+                            isPrompt = true;
+                        }
+                        else if (line.find("Response: ") == 0) {
+                            // Save previous message before resetting
+                            if (!currentMessage.empty()) {
+                                (isPrompt ? inputVector : outputVector).push_back(currentMessage);
+                            }
+                            currentMessage = line.substr(10);
+                            isPrompt = false;
+                        }
+                        else {
+                            currentMessage += (currentMessage.empty() ? "" : "\n") + line;
+                        }
+                    }
+
+                    // Ensure last message gets stored before closing the file
+                    if (!currentMessage.empty()) {
+                        (isPrompt ? inputVector : outputVector).push_back(currentMessage);
+                    }
+
+                    inFile.close();
+                }
+            }
+        }
+        ImGui::EndChild();
+
+        // end
         ImGui::End();
         ImGui::PopStyleColor();
     }
@@ -165,9 +228,10 @@ namespace App {
     // Renders Question Input Window
     void RenderQuestionInputWindow() {
 
-        // set window size and begin
-        ImGui::SetNextWindowSize(ImVec2(650, 130));
-        ImGui::Begin("Question Input Window", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
+        // set window size, begin, and set pos
+        ImGui::SetNextWindowSize(ImVec2(620, 120));
+        ImGui::SetNextWindowPos(ImVec2(0, 552));
+        ImGui::Begin("Question Input Window", nullptr, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
 
         // Static string to keep input throughout current frame
         static std::string inputText;
@@ -212,7 +276,7 @@ namespace App {
             std::string prompt = inputText;  // copy input to avoid lifetime issues
 
             std::thread([prompt, clientPtr = &client]() {
-                std::string result = clientPtr->sendPrompt(prompt);
+                std::string result = clientPtr->sendPrompt(prompt, showConsole);
                 }).detach();
 
             outputVector.push_back(client.getOutput());
@@ -226,22 +290,58 @@ namespace App {
             ImGui::EndTooltip();
         }
 
+        // save button
+        ImGui::SetCursorPos(ImVec2(488, 76));
+        if (ImGui::Button("Save")) {
+            #ifdef _WIN32
+                 _mkdir("chat_history");
+            #else
+                 mkdir("chat_history", 0755);
+            #endif
+            int fileNumber = 1;
+            std::string filePath;
+            do {
+                filePath = "chat_history/chat_history_" + std::to_string(fileNumber) + ".txt";
+                fileNumber++;
+            } while (std::ifstream(filePath).good());
+            std::ofstream outFile(filePath);
+            if (outFile.is_open()) {
+                size_t maxMessages = inputVector.size() >= outputVector.size() ? inputVector.size() : outputVector.size();
+                for (size_t i = 0; i < maxMessages; ++i) {
+                    if (i < inputVector.size() && !inputVector[i].empty()) {
+                        outFile << "User Prompt: " << inputVector[i] << "\n\n";
+                    }
+                    if (i < outputVector.size() && !outputVector[i].empty()) {
+                        outFile << "Response: " << outputVector[i] << "\n\n";
+                    }
+                }
+                outFile.close();
+            }
+        }
+
+        // new button
+        ImGui::SetCursorPos(ImVec2(534, 76));
+        if (ImGui::Button("New Chat")) {
+            inputVector.clear();
+            outputVector.clear();
+        }
 
         ImGui::End();
     }
 
     // Renders Question Output Window
     void RenderQuestionOutputWindow() {
-
-        // round window
+        // set window size, begin, set pos, and round window
         ImGui::GetStyle().WindowRounding = 8.0f;
+        ImGui::SetNextWindowSize(ImVec2(616, 475));
+        ImGui::SetNextWindowPos(ImVec2(3, 80));
         ImGui::Begin("Question Out Window", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
 
         // scrollable region
         ImGui::BeginChild("ChatRegion", ImVec2(0, ImGui::GetWindowHeight() - 20), true);
 
         float padding = 5.0f;
-        ImGui::PushTextWrapPos(ImGui::GetWindowWidth() - 2 * padding);
+        ImGui::PushTextWrapPos(ImGui::GetWindowWidth() - 2 * padding - ImGui::GetStyle().ScrollbarSize);
 
         // Alternate messages (inputVector/outputVector)
         size_t maxMessages = inputVector.size() >= outputVector.size() ? inputVector.size() : outputVector.size();
@@ -254,7 +354,7 @@ namespace App {
                 // Move cursor to the right side for text
                 float windowWidth = ImGui::GetWindowWidth();
                 ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 10.0f);
-                ImGui::SetCursorPosX(windowWidth - textSize.x - padding - 10.0f);
+                ImGui::SetCursorPosX(windowWidth - textSize.x - padding - 10.0f - ImGui::GetStyle().ScrollbarSize);
 
                 ImVec2 textStart = ImGui::GetCursorScreenPos();
 
