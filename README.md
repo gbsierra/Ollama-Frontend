@@ -1,7 +1,11 @@
-# Model Application 🏦
+# Model Application 🧠
 
 
 ## Screenshots 📸
+
+![Main](/screenshots/1.png)  
+
+![Select Model](/screenshots/2.png)  
 
 
 ### Getting Started 🚀
