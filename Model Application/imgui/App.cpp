@@ -48,18 +48,89 @@ std::vector<std::string> get_ollama_model_names() {
     return model_names;
 }
 
+std::string get_ollama_model_info(const std::string& model_name) {
+    std::string result;
+
+    // Temporary file to store ollama show output
+    const char* temp_file = "ollama_show_output.txt";
+
+    // Run ollama show with the model name and redirect output to a file
+    std::string command = "ollama show " + model_name + " > " + std::string(temp_file);
+    int status = std::system(command.c_str());
+    if (status != 0) {
+        std::cerr << "Error: Failed to run ollama show command for model " << model_name << std::endl;
+        return "Failed to retrieve model info.";
+    }
+
+    // Read the output from the temporary file
+    std::ifstream file(temp_file);
+    if (!file.is_open()) {
+        std::cerr << "Error: Failed to open temporary file" << std::endl;
+        return "Failed to open output file.";
+    }
+
+    // Parse the file to extract the Model section
+    std::string line;
+    std::string model_section;
+    bool in_model_section = false;
+    while (std::getline(file, line)) {
+        // Check for the start of the Model section
+        if (line.find("Model") != std::string::npos) {
+            in_model_section = true;
+            // Extract content after "Model"
+            size_t start = line.find("Model") + 6;
+            if (start < line.length()) {
+                model_section = line.substr(start);
+                // Trim leading/trailing whitespace
+                while (!model_section.empty() && std::isspace(model_section.front())) {
+                    model_section.erase(model_section.begin());
+                }
+                while (!model_section.empty() && std::isspace(model_section.back())) {
+                    model_section.pop_back();
+                }
+            }
+            continue;
+        }
+        // Collect lines in the Model section until a new section or empty line
+        if (in_model_section) {
+            if (line.empty() || line.find("Capabilities") != std::string::npos) {
+                in_model_section = false; // Stop at empty line or new section
+                break;
+            }
+            // Trim whitespace from the line
+            std::string trimmed_line = line;
+            while (!trimmed_line.empty() && std::isspace(trimmed_line.front())) {
+                trimmed_line.erase(trimmed_line.begin());
+            }
+            while (!trimmed_line.empty() && std::isspace(trimmed_line.back())) {
+                trimmed_line.pop_back();
+            }
+            if (!trimmed_line.empty()) {
+                model_section += "\n" + trimmed_line;
+            }
+        }
+    }
+
+    file.close();
+
+    // Clean up the temporary file
+    std::remove(temp_file);
+
+    // Return the model section or an error message if not found
+    return model_section.empty() ? "No model info found for " + model_name + "." : model_section;
+}
+
 // App Namespace for imgui implementation
 namespace App {
 
     // Declarations
-    static std::vector<std::string> model_names = get_ollama_model_names(); // vector of strings with added ollama models
-
-    static int selected = 0;
-    ModelClient client(model_names[selected]);
-    std::vector<std::string> outputVector;
-    std::vector<std::string> inputVector;
-
-    bool showConsole = true; // show console with output?
+    static std::vector<std::string> model_names = get_ollama_model_names(); // added model names
+    static int selected = 0;                                                // selected model index
+    ModelClient client(model_names[selected]);                              // inital client
+    std::vector<std::string> outputVector;                                  // holds outputs
+    std::vector<std::string> inputVector;                                   // holds inputs
+    std::string model_info = get_ollama_model_info(model_names[selected]);  // holds current model info
+    bool showConsole = false;                                               // show console with output?
 
     // Renders Main Header - called by RenderApplicationWindow()
     void RenderApplicationHeader() {
@@ -108,28 +179,33 @@ namespace App {
         ImGui::SetCursorPosX(10);
         static char new_model_name[64] = "";
 
-        //is running? (begin)
+        // "Select Model" dropdown
         if (client.running) {
             ImGui::BeginDisabled();
         }
-
-        // "Select Model" dropdown
+        ImGui::SetNextItemWidth(465.0f);
         if (ImGui::BeginCombo("Select Model", model_names.empty() ? "No Models" : model_names[selected].c_str())) {
+            
+            // list of models
             for (int i = 0; i < model_names.size(); i++) {
                 bool is_selected = (selected == i);
+                
                 if (ImGui::Selectable(model_names[i].c_str(), is_selected)) {
                     selected = i;
-                    client.setModel(model_names[selected]);
+                    client.setModel(model_names[selected]); // set model
+                    model_info = get_ollama_model_info(model_names[selected]); // retrieve model info
                 }
                 if (is_selected) {
                     ImGui::SetItemDefaultFocus();
                 }
             }
 
-            // Separator and input field (with create button and help button)
+            // input field 'New Model Name'
             ImGui::Separator();
             ImGui::InputText("New Model Name", new_model_name, IM_ARRAYSIZE(new_model_name));
             ImGui::SameLine();
+            
+            // help '?' button
             if (ImGui::Button("?")) {
                 ImGui::OpenPopup("HelpTooltipPopup"); // Open a popup to act as a tooltip
             }
@@ -147,6 +223,8 @@ namespace App {
                 }
                 ImGui::EndPopup();
             }
+            
+            // add model button
             if (ImGui::Button("Add")) {
                 if (strlen(new_model_name) > 0) {
                     model_names.push_back(std::string(new_model_name));
@@ -158,25 +236,37 @@ namespace App {
 
             ImGui::EndCombo();
         }
-        
-        //is running? (end)
         if (client.running) {
             ImGui::EndDisabled();
         }
 
-        // console toggle button
+        // model info '?' button
         ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 27);
-        //is running? (begin)
+        if (ImGui::Button("?")) {
+            ImGui::OpenPopup("ModelInfoPopup");
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::SeparatorText("Model Information:");
+            ImGui::EndTooltip();
+        }
+        if (ImGui::BeginPopup("ModelInfoPopup")) {
+            ImGui::SeparatorText(model_info.c_str()); // Display the 'Model' section
+            ImGui::NewLine();
+            
+            ImGui::EndPopup();
+        }
+
+        // 'show console' toggle button
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 55);
         if (client.running) {
             ImGui::BeginDisabled();
         }
         ImGui::Checkbox("Show Console", &showConsole);
-        //is running? (end)
         if (client.running) {
             ImGui::EndDisabled();
         }
-        //ImGui::Text("%s", showConsole ? "true" : "false"); //debug
         ImGui::Separator();
 
         // vertical seperator
@@ -188,10 +278,10 @@ namespace App {
         ImGui::Text("Saved Chat Histories:");
         ImGui::SetCursorPos(ImVec2(626, 63));
         ImGui::BeginChild("ChatHistoryList", ImVec2(165, 525), true);
-        for (int fileNumber = 1; fileNumber <= 100; ++fileNumber) {
+        for (int fileNumber = 1; fileNumber <= 60; ++fileNumber) { // temp limit to 60 history. (will soon have filenames given by ai, theres limits without filesystem from C++17)
             std::string filePath = "chat_history/chat_history_" + std::to_string(fileNumber) + ".txt";
             if (!std::ifstream(filePath).good()) {
-                break;
+                continue;
             }
             std::string buttonLabel = "chat_history_" + std::to_string(fileNumber);
             
@@ -200,15 +290,18 @@ namespace App {
                 ImGui::BeginDisabled();
             }
 
+            // load chat
             if (ImGui::Selectable(buttonLabel.c_str())) {
-                inputVector.clear();
-                outputVector.clear();
                 std::ifstream inFile(filePath);
                 if (inFile.is_open()) {
                     std::string line;
                     std::string currentMessage;
                     bool isPrompt = false;
 
+                    inputVector.clear();
+                    outputVector.clear();
+
+                    // save chat file
                     while (std::getline(inFile, line)) {
                         if (line.empty()) continue;
 
@@ -232,8 +325,7 @@ namespace App {
                             currentMessage += (currentMessage.empty() ? "" : "\n") + line;
                         }
                     }
-
-                    // Ensure last message gets stored before closing the file
+                    // store last msg
                     if (!currentMessage.empty()) {
                         (isPrompt ? inputVector : outputVector).push_back(currentMessage);
                     }
@@ -241,6 +333,20 @@ namespace App {
                     inFile.close();
                 }
             }
+            // right clicked?
+            if (ImGui::BeginPopupContextItem()) {
+                ImGui::Text("Are you sure you want\nto delete this chat?");
+                if (ImGui::Button("Yes")) {
+                    if(std::ifstream(filePath).good()) std::remove(filePath.c_str()); // deletion
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("No")) {
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+
 
             //is running? (end)
             if (client.running) {
@@ -296,10 +402,11 @@ namespace App {
 
         // Render input field with increased height
         InputTextWithResize("##YourQuestion", "Enter your message here...", inputText);
-
-        if (!outputVector.empty()) {
-            outputVector.back() = client.getOutput();
-        }
+        
+        // dynamically update output if running
+            if (!outputVector.empty() && client.running) {
+                outputVector.back() = client.getOutput();
+            }
         
         //is running? (begin)
         if (client.running) {
@@ -357,6 +464,11 @@ namespace App {
                 outFile.close();
             }
         }
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::SeparatorText("Save current chat to a file!");
+            ImGui::EndTooltip();
+        }
 
         //is running? (end)
         if (client.running) {
@@ -369,6 +481,11 @@ namespace App {
             inputVector.clear();
             outputVector.clear();
             client.TerminateOllamaTasks(showConsole);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::SeparatorText("Create new chat!");
+            ImGui::EndTooltip();
         }
 
         ImGui::End();
