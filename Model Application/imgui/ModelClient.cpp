@@ -13,10 +13,12 @@
 // ModelClient class for interacting with Ollama
 class ModelClient {
 private:
-    std::string model;
+    std::string model; // model name
     std::string output;
 
 public:
+    bool running = false; // currently running?
+
     // Constructor
     ModelClient(const std::string& modelName){
         model = modelName;
@@ -54,6 +56,8 @@ public:
             throw std::runtime_error("Model name is not specified");
         }
 
+        running = true;
+
         // Escape special characters in prompt
         std::string escapedPrompt;
         for (char c : prompt) {
@@ -69,6 +73,7 @@ public:
         // Execute command (recieves response dynamically)
         std::string result = OpenTerminal(command, true, showConsole);
 
+        running = false;
         return result;
     }
 
@@ -206,5 +211,99 @@ public:
         return result;
     }
 
+    // TerminateOllamaTasks() - terminates ollama tasks to begin new chat
+    std::string TerminateOllamaTasks(bool showConsole = true) {
+        static bool consoleAllocated = false;
+        static std::string ansiBuffer; // Persistent buffer for ANSI sequences
+
+        // Showing console
+        if (showConsole) {
+            // Always attempt to allocate or ensure console is available
+            if (!consoleAllocated) {
+                FreeConsole(); // Ensure clean state
+                if (AllocConsole()) {
+                    FILE* dummy;
+                    freopen_s(&dummy, "CONOUT$", "w", stdout);
+                    freopen_s(&dummy, "CONOUT$", "w", stderr);
+                    freopen_s(&dummy, "CONIN$", "r", stdin);
+                    consoleAllocated = true;
+
+                    HWND consoleWindow = GetConsoleWindow();
+                    if (consoleWindow) {
+                        ShowWindow(consoleWindow, SW_SHOW);
+                        SetForegroundWindow(consoleWindow);
+                    }
+
+                    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+                    if (hConsole != INVALID_HANDLE_VALUE) {
+                        const char* testMsg = "DEBUG: Console allocated successfully!\n\n";
+                        DWORD written;
+                        WriteConsoleA(hConsole, testMsg, strlen(testMsg), &written, nullptr);
+                    }
+                }
+                else {
+                    return "Console allocation failed!";
+                }
+            }
+            else {
+                // Ensure console is visible if already allocated
+                HWND consoleWindow = GetConsoleWindow();
+                if (consoleWindow) {
+                    ShowWindow(consoleWindow, SW_SHOW);
+                    SetForegroundWindow(consoleWindow);
+                }
+            }
+        }
+        // Not showing console
+        else {
+            // Allocate and hide console
+            if (!consoleAllocated) {
+                AllocConsole();
+                consoleAllocated = true;
+            }
+            HWND consoleWindow = GetConsoleWindow();
+            if (consoleWindow) {
+                ShowWindow(consoleWindow, SW_HIDE);
+            }
+        }
+
+        // Command to terminate all Ollama processes
+        std::string command = "taskkill /IM ollama.exe /F /T";
+        std::string fullCommand = "cmd.exe /C \"" + command + " < nul 2>&1\"";
+        std::string result;
+
+        // Execute command and capture output
+        std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(fullCommand.c_str(), "r"), _pclose);
+        if (!pipe) {
+            return "Failed to open pipe.";
+        }
+
+        char buffer[128];
+        // Handle stream in chunks
+        while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
+            std::string chunk(buffer);
+            std::string cleanChunk = removeAnsiCodes(chunk, ansiBuffer); // Pass persistent buffer
+            result += cleanChunk;
+            setOutput(result); // Set output for ImGui to dynamically update
+            if (showConsole && consoleAllocated) { // Write to allocated console
+                HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+                if (hConsole != INVALID_HANDLE_VALUE) {
+                    DWORD written;
+                    WriteConsoleA(hConsole, cleanChunk.c_str(), (DWORD)cleanChunk.length(), &written, nullptr);
+                }
+            }
+        }
+
+        int status = _pclose(pipe.get());
+        if (status != 0) {
+            // taskkill may return non-zero status even on success (e.g., if no process is found)
+            if (result.find("SUCCESS") != std::string::npos || result.find("not found") != std::string::npos) {
+                return "Ollama tasks terminated: " + result;
+            }
+            return "Command failed with status " + std::to_string(status) + ": " + result;
+        }
+
+        return "Ollama tasks terminated: " + result;
+    }
 
 };

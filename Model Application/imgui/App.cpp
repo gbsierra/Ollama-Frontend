@@ -59,7 +59,7 @@ namespace App {
     std::vector<std::string> outputVector;
     std::vector<std::string> inputVector;
 
-    bool showConsole = true;
+    bool showConsole = true; // show console with output?
 
     // Renders Main Header - called by RenderApplicationWindow()
     void RenderApplicationHeader() {
@@ -108,6 +108,11 @@ namespace App {
         ImGui::SetCursorPosX(10);
         static char new_model_name[64] = "";
 
+        //is running? (begin)
+        if (client.running) {
+            ImGui::BeginDisabled();
+        }
+
         // "Select Model" dropdown
         if (ImGui::BeginCombo("Select Model", model_names.empty() ? "No Models" : model_names[selected].c_str())) {
             for (int i = 0; i < model_names.size(); i++) {
@@ -154,10 +159,23 @@ namespace App {
             ImGui::EndCombo();
         }
         
+        //is running? (end)
+        if (client.running) {
+            ImGui::EndDisabled();
+        }
+
         // console toggle button
         ImGui::SameLine();
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 27);
+        //is running? (begin)
+        if (client.running) {
+            ImGui::BeginDisabled();
+        }
         ImGui::Checkbox("Show Console", &showConsole);
+        //is running? (end)
+        if (client.running) {
+            ImGui::EndDisabled();
+        }
         //ImGui::Text("%s", showConsole ? "true" : "false"); //debug
         ImGui::Separator();
 
@@ -176,6 +194,12 @@ namespace App {
                 break;
             }
             std::string buttonLabel = "chat_history_" + std::to_string(fileNumber);
+            
+            //is running? (begin)
+            if (client.running) {
+                ImGui::BeginDisabled();
+            }
+
             if (ImGui::Selectable(buttonLabel.c_str())) {
                 inputVector.clear();
                 outputVector.clear();
@@ -216,6 +240,11 @@ namespace App {
 
                     inFile.close();
                 }
+            }
+
+            //is running? (end)
+            if (client.running) {
+                ImGui::EndDisabled();
             }
         }
         ImGui::EndChild();
@@ -271,9 +300,18 @@ namespace App {
         if (!outputVector.empty()) {
             outputVector.back() = client.getOutput();
         }
+        
+        //is running? (begin)
+        if (client.running) {
+            ImGui::BeginDisabled();
+        }
+
         // Submit button
-        if (ImGui::Button("Submit")) {
+        if (ImGui::Button("Submit") || (ImGui::IsKeyPressed(ImGuiKey_Enter))) {
             std::string prompt = inputText;  // copy input to avoid lifetime issues
+
+            // Replace all newline characters with spaces
+            std::replace(prompt.begin(), prompt.end(), '\n', ' ');
 
             std::thread([prompt, clientPtr = &client]() {
                 std::string result = clientPtr->sendPrompt(prompt, showConsole);
@@ -282,6 +320,7 @@ namespace App {
             outputVector.push_back(client.getOutput());
             //client.clearOutput();
             inputVector.push_back(inputText);
+            ImGui::SetKeyboardFocusHere();
             inputText.clear(); // clear input after sending
         }
         if (ImGui::IsItemHovered()) {
@@ -319,11 +358,17 @@ namespace App {
             }
         }
 
+        //is running? (end)
+        if (client.running) {
+            ImGui::EndDisabled();
+        }
+
         // new button
         ImGui::SetCursorPos(ImVec2(534, 76));
         if (ImGui::Button("New Chat")) {
             inputVector.clear();
             outputVector.clear();
+            client.TerminateOllamaTasks(showConsole);
         }
 
         ImGui::End();

@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <vector>
 #include <fstream>
+#include <algorithm>
 #ifdef _WIN32
 #include <direct.h>
 #else
